@@ -3388,20 +3388,23 @@ func (s *Abort) AsBuilder() AbortBuilder {
 }
 
 type VCDisputeBuilder struct {
-	sig_a Bytes
-	sig_b Bytes
+	sig_a             Bytes
+	sig_b             Bytes
+	parent_state_sigs Dispute
 }
 
 func (s *VCDisputeBuilder) Build() VCDispute {
 	b := new(bytes.Buffer)
 
-	totalSize := HeaderSizeUint * (2 + 1)
-	offsets := make([]uint32, 0, 2)
+	totalSize := HeaderSizeUint * (3 + 1)
+	offsets := make([]uint32, 0, 3)
 
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.sig_a.AsSlice()))
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.sig_b.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.parent_state_sigs.AsSlice()))
 
 	b.Write(packNumber(Number(totalSize)))
 
@@ -3411,6 +3414,7 @@ func (s *VCDisputeBuilder) Build() VCDispute {
 
 	b.Write(s.sig_a.AsSlice())
 	b.Write(s.sig_b.AsSlice())
+	b.Write(s.parent_state_sigs.AsSlice())
 	return VCDispute{inner: b.Bytes()}
 }
 
@@ -3424,8 +3428,13 @@ func (s *VCDisputeBuilder) SigB(v Bytes) *VCDisputeBuilder {
 	return s
 }
 
+func (s *VCDisputeBuilder) ParentStateSigs(v Dispute) *VCDisputeBuilder {
+	s.parent_state_sigs = v
+	return s
+}
+
 func NewVCDisputeBuilder() *VCDisputeBuilder {
-	return &VCDisputeBuilder{sig_a: BytesDefault(), sig_b: BytesDefault()}
+	return &VCDisputeBuilder{sig_a: BytesDefault(), sig_b: BytesDefault(), parent_state_sigs: DisputeDefault()}
 }
 
 type VCDispute struct {
@@ -3440,7 +3449,7 @@ func (s *VCDispute) AsSlice() []byte {
 }
 
 func VCDisputeDefault() VCDispute {
-	return *VCDisputeFromSliceUnchecked([]byte{20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *VCDisputeFromSliceUnchecked([]byte{44, 0, 0, 0, 16, 0, 0, 0, 20, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func VCDisputeFromSlice(slice []byte, compatible bool) (*VCDispute, error) {
@@ -3456,7 +3465,7 @@ func VCDisputeFromSlice(slice []byte, compatible bool) (*VCDispute, error) {
 		return nil, errors.New(errMsg)
 	}
 
-	if uint32(sliceLen) == HeaderSizeUint && 2 == 0 {
+	if uint32(sliceLen) == HeaderSizeUint && 3 == 0 {
 		return &VCDispute{inner: slice}, nil
 	}
 
@@ -3477,9 +3486,9 @@ func VCDisputeFromSlice(slice []byte, compatible bool) (*VCDispute, error) {
 	}
 
 	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
-	if fieldCount < 2 {
+	if fieldCount < 3 {
 		return nil, errors.New("FieldCountNotMatch")
-	} else if !compatible && fieldCount > 2 {
+	} else if !compatible && fieldCount > 3 {
 		return nil, errors.New("FieldCountNotMatch")
 	}
 
@@ -3508,6 +3517,11 @@ func VCDisputeFromSlice(slice []byte, compatible bool) (*VCDispute, error) {
 		return nil, err
 	}
 
+	_, err = DisputeFromSlice(slice[offsets[2]:offsets[3]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
 	return &VCDispute{inner: slice}, nil
 }
 
@@ -3529,11 +3543,11 @@ func (s *VCDispute) IsEmpty() bool {
 	return s.Len() == 0
 }
 func (s *VCDispute) CountExtraFields() uint {
-	return s.FieldCount() - 2
+	return s.FieldCount() - 3
 }
 
 func (s *VCDispute) HasExtraFields() bool {
-	return 2 != s.FieldCount()
+	return 3 != s.FieldCount()
 }
 
 func (s *VCDispute) SigA() *Bytes {
@@ -3543,19 +3557,25 @@ func (s *VCDispute) SigA() *Bytes {
 }
 
 func (s *VCDispute) SigB() *Bytes {
-	var ret *Bytes
 	start := unpackNumber(s.inner[8:])
+	end := unpackNumber(s.inner[12:])
+	return BytesFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *VCDispute) ParentStateSigs() *Dispute {
+	var ret *Dispute
+	start := unpackNumber(s.inner[12:])
 	if s.HasExtraFields() {
-		end := unpackNumber(s.inner[12:])
-		ret = BytesFromSliceUnchecked(s.inner[start:end])
+		end := unpackNumber(s.inner[16:])
+		ret = DisputeFromSliceUnchecked(s.inner[start:end])
 	} else {
-		ret = BytesFromSliceUnchecked(s.inner[start:])
+		ret = DisputeFromSliceUnchecked(s.inner[start:])
 	}
 	return ret
 }
 
 func (s *VCDispute) AsBuilder() VCDisputeBuilder {
-	ret := NewVCDisputeBuilder().SigA(*s.SigA()).SigB(*s.SigB())
+	ret := NewVCDisputeBuilder().SigA(*s.SigA()).SigB(*s.SigB()).ParentStateSigs(*s.ParentStateSigs())
 	return *ret
 }
 
@@ -4078,30 +4098,44 @@ func (s *ChannelWitnessUnion) IntoDispute() *Dispute {
 	}
 }
 
-func ChannelWitnessUnionFromClose(v Close) ChannelWitnessUnion {
+func ChannelWitnessUnionFromVCDispute(v VCDispute) ChannelWitnessUnion {
 	return ChannelWitnessUnion{itemID: 3, inner: v.AsSlice()}
 }
 
-func (s *ChannelWitnessUnion) IntoClose() *Close {
+func (s *ChannelWitnessUnion) IntoVCDispute() *VCDispute {
 	switch s.ItemID() {
 	case 3:
-		return CloseFromSliceUnchecked(s.AsSlice())
+		return VCDisputeFromSliceUnchecked(s.AsSlice())
 	default:
 		errMsg := strings.Join([]string{"invalid item_id: expect 3, found", strconv.Itoa(int(s.ItemID()))}, " ")
 		panic(errMsg)
 	}
 }
 
-func ChannelWitnessUnionFromForceClose(v ForceClose) ChannelWitnessUnion {
+func ChannelWitnessUnionFromClose(v Close) ChannelWitnessUnion {
 	return ChannelWitnessUnion{itemID: 4, inner: v.AsSlice()}
+}
+
+func (s *ChannelWitnessUnion) IntoClose() *Close {
+	switch s.ItemID() {
+	case 4:
+		return CloseFromSliceUnchecked(s.AsSlice())
+	default:
+		errMsg := strings.Join([]string{"invalid item_id: expect 4, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		panic(errMsg)
+	}
+}
+
+func ChannelWitnessUnionFromForceClose(v ForceClose) ChannelWitnessUnion {
+	return ChannelWitnessUnion{itemID: 5, inner: v.AsSlice()}
 }
 
 func (s *ChannelWitnessUnion) IntoForceClose() *ForceClose {
 	switch s.ItemID() {
-	case 4:
+	case 5:
 		return ForceCloseFromSliceUnchecked(s.AsSlice())
 	default:
-		errMsg := strings.Join([]string{"invalid item_id: expect 4, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		errMsg := strings.Join([]string{"invalid item_id: expect 5, found", strconv.Itoa(int(s.ItemID()))}, " ")
 		panic(errMsg)
 	}
 }
@@ -4119,9 +4153,12 @@ func (s *ChannelWitnessUnion) ItemName() string {
 		return "Dispute"
 
 	case 3:
-		return "Close"
+		return "VCDispute"
 
 	case 4:
+		return "Close"
+
+	case 5:
 		return "ForceClose"
 
 	default:
@@ -4146,6 +4183,9 @@ func (s *ChannelWitness) ToUnion() *ChannelWitnessUnion {
 
 	case 4:
 		return &ChannelWitnessUnion{itemID: 4, inner: s.inner[HeaderSizeUint:]}
+
+	case 5:
+		return &ChannelWitnessUnion{itemID: 5, inner: s.inner[HeaderSizeUint:]}
 
 	default:
 		panic("invalid data: ChannelWitness")
@@ -4182,12 +4222,18 @@ func ChannelWitnessFromSlice(slice []byte, compatible bool) (*ChannelWitness, er
 		}
 
 	case 3:
-		_, err := CloseFromSlice(innerSlice, compatible)
+		_, err := VCDisputeFromSlice(innerSlice, compatible)
 		if err != nil {
 			return nil, err
 		}
 
 	case 4:
+		_, err := CloseFromSlice(innerSlice, compatible)
+		if err != nil {
+			return nil, err
+		}
+
+	case 5:
 		_, err := ForceCloseFromSlice(innerSlice, compatible)
 		if err != nil {
 			return nil, err
@@ -5143,9 +5189,9 @@ func (s *ParentData) AsBuilder() ParentDataBuilder {
 }
 
 type VirtualChannelStatusBuilder struct {
-	vcstate         ChannelState
-	parents         ParentsVec
-	firstForceClose Bool
+	vcstate           ChannelState
+	parents           ParentsVec
+	first_force_close Bool
 }
 
 func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
@@ -5159,7 +5205,7 @@ func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.parents.AsSlice()))
 	offsets = append(offsets, totalSize)
-	totalSize += uint32(len(s.firstForceClose.AsSlice()))
+	totalSize += uint32(len(s.first_force_close.AsSlice()))
 
 	b.Write(packNumber(Number(totalSize)))
 
@@ -5169,7 +5215,7 @@ func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
 
 	b.Write(s.vcstate.AsSlice())
 	b.Write(s.parents.AsSlice())
-	b.Write(s.firstForceClose.AsSlice())
+	b.Write(s.first_force_close.AsSlice())
 	return VirtualChannelStatus{inner: b.Bytes()}
 }
 
@@ -5184,12 +5230,12 @@ func (s *VirtualChannelStatusBuilder) Parents(v ParentsVec) *VirtualChannelStatu
 }
 
 func (s *VirtualChannelStatusBuilder) FirstForceClose(v Bool) *VirtualChannelStatusBuilder {
-	s.firstForceClose = v
+	s.first_force_close = v
 	return s
 }
 
 func NewVirtualChannelStatusBuilder() *VirtualChannelStatusBuilder {
-	return &VirtualChannelStatusBuilder{vcstate: ChannelStateDefault(), parents: ParentsVecDefault(), firstForceClose: BoolDefault()}
+	return &VirtualChannelStatusBuilder{vcstate: ChannelStateDefault(), parents: ParentsVecDefault(), first_force_close: BoolDefault()}
 }
 
 type VirtualChannelStatus struct {
