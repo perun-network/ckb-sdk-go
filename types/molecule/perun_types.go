@@ -2009,7 +2009,7 @@ func (s *SUDTAsset) AsBuilder() SUDTAssetBuilder {
 }
 
 type ETHAssetBuilder struct {
-	max_capacity  Uint64
+	chain_id      Uint128
 	asset_address EthAddress
 }
 
@@ -2020,7 +2020,7 @@ func (s *ETHAssetBuilder) Build() ETHAsset {
 	offsets := make([]uint32, 0, 2)
 
 	offsets = append(offsets, totalSize)
-	totalSize += uint32(len(s.max_capacity.AsSlice()))
+	totalSize += uint32(len(s.chain_id.AsSlice()))
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.asset_address.AsSlice()))
 
@@ -2030,13 +2030,13 @@ func (s *ETHAssetBuilder) Build() ETHAsset {
 		b.Write(packNumber(Number(offsets[i])))
 	}
 
-	b.Write(s.max_capacity.AsSlice())
+	b.Write(s.chain_id.AsSlice())
 	b.Write(s.asset_address.AsSlice())
 	return ETHAsset{inner: b.Bytes()}
 }
 
-func (s *ETHAssetBuilder) MaxCapacity(v Uint64) *ETHAssetBuilder {
-	s.max_capacity = v
+func (s *ETHAssetBuilder) ChainId(v Uint128) *ETHAssetBuilder {
+	s.chain_id = v
 	return s
 }
 
@@ -2046,7 +2046,7 @@ func (s *ETHAssetBuilder) AssetAddress(v EthAddress) *ETHAssetBuilder {
 }
 
 func NewETHAssetBuilder() *ETHAssetBuilder {
-	return &ETHAssetBuilder{max_capacity: Uint64Default(), asset_address: EthAddressDefault()}
+	return &ETHAssetBuilder{chain_id: Uint128Default(), asset_address: EthAddressDefault()}
 }
 
 type ETHAsset struct {
@@ -2061,7 +2061,7 @@ func (s *ETHAsset) AsSlice() []byte {
 }
 
 func ETHAssetDefault() ETHAsset {
-	return *ETHAssetFromSliceUnchecked([]byte{40, 0, 0, 0, 12, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *ETHAssetFromSliceUnchecked([]byte{48, 0, 0, 0, 12, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func ETHAssetFromSlice(slice []byte, compatible bool) (*ETHAsset, error) {
@@ -2119,7 +2119,7 @@ func ETHAssetFromSlice(slice []byte, compatible bool) (*ETHAsset, error) {
 
 	var err error
 
-	_, err = Uint64FromSlice(slice[offsets[0]:offsets[1]], compatible)
+	_, err = Uint128FromSlice(slice[offsets[0]:offsets[1]], compatible)
 	if err != nil {
 		return nil, err
 	}
@@ -2157,10 +2157,10 @@ func (s *ETHAsset) HasExtraFields() bool {
 	return 2 != s.FieldCount()
 }
 
-func (s *ETHAsset) MaxCapacity() *Uint64 {
+func (s *ETHAsset) ChainId() *Uint128 {
 	start := unpackNumber(s.inner[4:])
 	end := unpackNumber(s.inner[8:])
-	return Uint64FromSliceUnchecked(s.inner[start:end])
+	return Uint128FromSliceUnchecked(s.inner[start:end])
 }
 
 func (s *ETHAsset) AssetAddress() *EthAddress {
@@ -2176,7 +2176,7 @@ func (s *ETHAsset) AssetAddress() *EthAddress {
 }
 
 func (s *ETHAsset) AsBuilder() ETHAssetBuilder {
-	ret := NewETHAssetBuilder().MaxCapacity(*s.MaxCapacity()).AssetAddress(*s.AssetAddress())
+	ret := NewETHAssetBuilder().ChainId(*s.ChainId()).AssetAddress(*s.AssetAddress())
 	return *ret
 }
 
@@ -2405,7 +2405,7 @@ func (s *ETHBalances) AsSlice() []byte {
 }
 
 func ETHBalancesDefault() ETHBalances {
-	return *ETHBalancesFromSliceUnchecked([]byte{84, 0, 0, 0, 12, 0, 0, 0, 52, 0, 0, 0, 40, 0, 0, 0, 12, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *ETHBalancesFromSliceUnchecked([]byte{92, 0, 0, 0, 12, 0, 0, 0, 60, 0, 0, 0, 48, 0, 0, 0, 12, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func ETHBalancesFromSlice(slice []byte, compatible bool) (*ETHBalances, error) {
