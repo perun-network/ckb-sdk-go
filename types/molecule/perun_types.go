@@ -1112,196 +1112,6 @@ func (s *SUDTAllocation) AsBuilder() SUDTAllocationBuilder {
 	return *t
 }
 
-type ETHAllocationBuilder struct {
-	inner []ETHBalances
-}
-
-func (s *ETHAllocationBuilder) Build() ETHAllocation {
-	itemCount := len(s.inner)
-
-	b := new(bytes.Buffer)
-
-	// Empty dyn vector, just return size's bytes
-	if itemCount == 0 {
-		b.Write(packNumber(Number(HeaderSizeUint)))
-		return ETHAllocation{inner: b.Bytes()}
-	}
-
-	// Calculate first offset then loop for rest items offsets
-	totalSize := HeaderSizeUint * uint32(itemCount+1)
-	offsets := make([]uint32, 0, itemCount)
-	offsets = append(offsets, totalSize)
-	for i := 1; i < itemCount; i++ {
-		totalSize += uint32(len(s.inner[i-1].AsSlice()))
-		offsets = append(offsets, offsets[i-1]+uint32(len(s.inner[i-1].AsSlice())))
-	}
-	totalSize += uint32(len(s.inner[itemCount-1].AsSlice()))
-
-	b.Write(packNumber(Number(totalSize)))
-
-	for i := 0; i < itemCount; i++ {
-		b.Write(packNumber(Number(offsets[i])))
-	}
-
-	for i := 0; i < itemCount; i++ {
-		b.Write(s.inner[i].AsSlice())
-	}
-
-	return ETHAllocation{inner: b.Bytes()}
-}
-
-func (s *ETHAllocationBuilder) Set(v []ETHBalances) *ETHAllocationBuilder {
-	s.inner = v
-	return s
-}
-func (s *ETHAllocationBuilder) Push(v ETHBalances) *ETHAllocationBuilder {
-	s.inner = append(s.inner, v)
-	return s
-}
-func (s *ETHAllocationBuilder) Extend(iter []ETHBalances) *ETHAllocationBuilder {
-	for i := 0; i < len(iter); i++ {
-		s.inner = append(s.inner, iter[i])
-	}
-	return s
-}
-func (s *ETHAllocationBuilder) Replace(index uint, v ETHBalances) *ETHBalances {
-	if uint(len(s.inner)) > index {
-		a := s.inner[index]
-		s.inner[index] = v
-		return &a
-	}
-	return nil
-}
-
-func NewETHAllocationBuilder() *ETHAllocationBuilder {
-	return &ETHAllocationBuilder{[]ETHBalances{}}
-}
-
-type ETHAllocation struct {
-	inner []byte
-}
-
-func ETHAllocationFromSliceUnchecked(slice []byte) *ETHAllocation {
-	return &ETHAllocation{inner: slice}
-}
-func (s *ETHAllocation) AsSlice() []byte {
-	return s.inner
-}
-
-func ETHAllocationDefault() ETHAllocation {
-	return *ETHAllocationFromSliceUnchecked([]byte{4, 0, 0, 0})
-}
-
-func ETHAllocationFromSlice(slice []byte, compatible bool) (*ETHAllocation, error) {
-	sliceLen := len(slice)
-
-	if uint32(sliceLen) < HeaderSizeUint {
-		errMsg := strings.Join([]string{"HeaderIsBroken", "ETHAllocation", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	totalSize := unpackNumber(slice)
-	if Number(sliceLen) != totalSize {
-		errMsg := strings.Join([]string{"TotalSizeNotMatch", "ETHAllocation", strconv.Itoa(int(sliceLen)), "!=", strconv.Itoa(int(totalSize))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	if uint32(sliceLen) == HeaderSizeUint {
-		return &ETHAllocation{inner: slice}, nil
-	}
-
-	if uint32(sliceLen) < HeaderSizeUint*2 {
-		errMsg := strings.Join([]string{"TotalSizeNotMatch", "ETHAllocation", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	offsetFirst := unpackNumber(slice[HeaderSizeUint:])
-	if uint32(offsetFirst)%HeaderSizeUint != 0 || uint32(offsetFirst) < HeaderSizeUint*2 {
-		errMsg := strings.Join([]string{"OffsetsNotMatch", "ETHAllocation", strconv.Itoa(int(offsetFirst % 4)), "!= 0", strconv.Itoa(int(offsetFirst)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	if sliceLen < int(offsetFirst) {
-		errMsg := strings.Join([]string{"HeaderIsBroken", "ETHAllocation", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(offsetFirst))}, " ")
-		return nil, errors.New(errMsg)
-	}
-	itemCount := uint32(offsetFirst)/HeaderSizeUint - 1
-
-	offsets := make([]uint32, itemCount)
-
-	for i := 0; i < int(itemCount); i++ {
-		offsets[i] = uint32(unpackNumber(slice[HeaderSizeUint:][int(HeaderSizeUint)*i:]))
-	}
-
-	offsets = append(offsets, uint32(totalSize))
-
-	for i := 0; i < len(offsets); i++ {
-		if i&1 != 0 && offsets[i-1] > offsets[i] {
-			errMsg := strings.Join([]string{"OffsetsNotMatch", "ETHAllocation"}, " ")
-			return nil, errors.New(errMsg)
-		}
-	}
-
-	for i := 0; i < len(offsets); i++ {
-		if i&1 != 0 {
-			start := offsets[i-1]
-			end := offsets[i]
-			_, err := ETHBalancesFromSlice(slice[start:end], compatible)
-
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return &ETHAllocation{inner: slice}, nil
-}
-
-func (s *ETHAllocation) TotalSize() uint {
-	return uint(unpackNumber(s.inner))
-}
-func (s *ETHAllocation) ItemCount() uint {
-	var number uint = 0
-	if uint32(s.TotalSize()) == HeaderSizeUint {
-		return number
-	}
-	number = uint(unpackNumber(s.inner[HeaderSizeUint:]))/4 - 1
-	return number
-}
-func (s *ETHAllocation) Len() uint {
-	return s.ItemCount()
-}
-func (s *ETHAllocation) IsEmpty() bool {
-	return s.Len() == 0
-}
-
-// if *ETHBalances is nil, index is out of bounds
-func (s *ETHAllocation) Get(index uint) *ETHBalances {
-	var b *ETHBalances
-	if index < s.Len() {
-		start_index := uint(HeaderSizeUint) * (1 + index)
-		start := unpackNumber(s.inner[start_index:])
-
-		if index == s.Len()-1 {
-			b = ETHBalancesFromSliceUnchecked(s.inner[start:])
-		} else {
-			end_index := start_index + uint(HeaderSizeUint)
-			end := unpackNumber(s.inner[end_index:])
-			b = ETHBalancesFromSliceUnchecked(s.inner[start:end])
-		}
-	}
-	return b
-}
-
-func (s *ETHAllocation) AsBuilder() ETHAllocationBuilder {
-	size := s.ItemCount()
-	t := NewETHAllocationBuilder()
-	for i := uint(0); i < size; i++ {
-		t.Push(*s.Get(i))
-	}
-	return *t
-}
-
 type LockedBalancesBuilder struct {
 	inner []SubAlloc
 }
@@ -1493,53 +1303,23 @@ func (s *LockedBalances) AsBuilder() LockedBalancesBuilder {
 }
 
 type AnyBalancesBuilder struct {
-	ckb  CKByteDistribution
-	sudt SUDTBalances
-	eth  ETHBalances
-}
-
-func (s *AnyBalancesBuilder) Build() AnyBalances {
-	b := new(bytes.Buffer)
-
-	totalSize := HeaderSizeUint * (3 + 1)
-	offsets := make([]uint32, 0, 3)
-
-	offsets = append(offsets, totalSize)
-	totalSize += uint32(len(s.ckb.AsSlice()))
-	offsets = append(offsets, totalSize)
-	totalSize += uint32(len(s.sudt.AsSlice()))
-	offsets = append(offsets, totalSize)
-	totalSize += uint32(len(s.eth.AsSlice()))
-
-	b.Write(packNumber(Number(totalSize)))
-
-	for i := 0; i < len(offsets); i++ {
-		b.Write(packNumber(Number(offsets[i])))
-	}
-
-	b.Write(s.ckb.AsSlice())
-	b.Write(s.sudt.AsSlice())
-	b.Write(s.eth.AsSlice())
-	return AnyBalances{inner: b.Bytes()}
-}
-
-func (s *AnyBalancesBuilder) Ckb(v CKByteDistribution) *AnyBalancesBuilder {
-	s.ckb = v
-	return s
-}
-
-func (s *AnyBalancesBuilder) Sudt(v SUDTBalances) *AnyBalancesBuilder {
-	s.sudt = v
-	return s
-}
-
-func (s *AnyBalancesBuilder) Eth(v ETHBalances) *AnyBalancesBuilder {
-	s.eth = v
-	return s
+	inner AnyBalancesUnion
 }
 
 func NewAnyBalancesBuilder() *AnyBalancesBuilder {
-	return &AnyBalancesBuilder{ckb: CKByteDistributionDefault(), sudt: SUDTBalancesDefault(), eth: ETHBalancesDefault()}
+	v := AnyBalancesDefault()
+	return &AnyBalancesBuilder{inner: *v.ToUnion()}
+}
+func (s *AnyBalancesBuilder) Set(v AnyBalancesUnion) *AnyBalancesBuilder {
+	s.inner = v
+	return s
+}
+func (s *AnyBalancesBuilder) Build() AnyBalances {
+	b := new(bytes.Buffer)
+	b.Write(packNumber(s.inner.itemID))
+	b.Write(s.inner.AsSlice())
+
+	return AnyBalances{inner: b.Bytes()}
 }
 
 type AnyBalances struct {
@@ -1554,7 +1334,95 @@ func (s *AnyBalances) AsSlice() []byte {
 }
 
 func AnyBalancesDefault() AnyBalances {
-	return *AnyBalancesFromSliceUnchecked([]byte{241, 0, 0, 0, 16, 0, 0, 0, 32, 0, 0, 0, 149, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 117, 0, 0, 0, 12, 0, 0, 0, 85, 0, 0, 0, 73, 0, 0, 0, 12, 0, 0, 0, 65, 0, 0, 0, 53, 0, 0, 0, 16, 0, 0, 0, 48, 0, 0, 0, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 92, 0, 0, 0, 12, 0, 0, 0, 60, 0, 0, 0, 48, 0, 0, 0, 12, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *AnyBalancesFromSliceUnchecked([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+}
+
+type AnyBalancesUnion struct {
+	itemID Number
+	inner  []byte
+}
+
+func (s *AnyBalancesUnion) AsSlice() []byte {
+	return s.inner
+}
+func (s *AnyBalancesUnion) ItemID() Number {
+	return s.itemID
+}
+
+func AnyBalancesUnionFromCKByteDistribution(v CKByteDistribution) AnyBalancesUnion {
+	return AnyBalancesUnion{itemID: 0, inner: v.AsSlice()}
+}
+
+func (s *AnyBalancesUnion) IntoCKByteDistribution() *CKByteDistribution {
+	switch s.ItemID() {
+	case 0:
+		return CKByteDistributionFromSliceUnchecked(s.AsSlice())
+	default:
+		errMsg := strings.Join([]string{"invalid item_id: expect 0, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		panic(errMsg)
+	}
+}
+
+func AnyBalancesUnionFromSUDTBalances(v SUDTBalances) AnyBalancesUnion {
+	return AnyBalancesUnion{itemID: 1, inner: v.AsSlice()}
+}
+
+func (s *AnyBalancesUnion) IntoSUDTBalances() *SUDTBalances {
+	switch s.ItemID() {
+	case 1:
+		return SUDTBalancesFromSliceUnchecked(s.AsSlice())
+	default:
+		errMsg := strings.Join([]string{"invalid item_id: expect 1, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		panic(errMsg)
+	}
+}
+
+func AnyBalancesUnionFromETHBalances(v ETHBalances) AnyBalancesUnion {
+	return AnyBalancesUnion{itemID: 2, inner: v.AsSlice()}
+}
+
+func (s *AnyBalancesUnion) IntoETHBalances() *ETHBalances {
+	switch s.ItemID() {
+	case 2:
+		return ETHBalancesFromSliceUnchecked(s.AsSlice())
+	default:
+		errMsg := strings.Join([]string{"invalid item_id: expect 2, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		panic(errMsg)
+	}
+}
+
+func (s *AnyBalancesUnion) ItemName() string {
+	switch s.itemID {
+
+	case 0:
+		return "CKByteDistribution"
+
+	case 1:
+		return "SUDTBalances"
+
+	case 2:
+		return "ETHBalances"
+
+	default:
+		panic("invalid data: AnyBalancesUnion")
+	}
+}
+
+func (s *AnyBalances) ToUnion() *AnyBalancesUnion {
+	switch s.ItemID() {
+
+	case 0:
+		return &AnyBalancesUnion{itemID: 0, inner: s.inner[HeaderSizeUint:]}
+
+	case 1:
+		return &AnyBalancesUnion{itemID: 1, inner: s.inner[HeaderSizeUint:]}
+
+	case 2:
+		return &AnyBalancesUnion{itemID: 2, inner: s.inner[HeaderSizeUint:]}
+
+	default:
+		panic("invalid data: AnyBalances")
+	}
 }
 
 func AnyBalancesFromSlice(slice []byte, compatible bool) (*AnyBalances, error) {
@@ -1563,125 +1431,40 @@ func AnyBalancesFromSlice(slice []byte, compatible bool) (*AnyBalances, error) {
 		errMsg := strings.Join([]string{"HeaderIsBroken", "AnyBalances", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint))}, " ")
 		return nil, errors.New(errMsg)
 	}
+	itemID := unpackNumber(slice)
+	innerSlice := slice[HeaderSizeUint:]
 
-	totalSize := unpackNumber(slice)
-	if Number(sliceLen) != totalSize {
-		errMsg := strings.Join([]string{"TotalSizeNotMatch", "AnyBalances", strconv.Itoa(int(sliceLen)), "!=", strconv.Itoa(int(totalSize))}, " ")
-		return nil, errors.New(errMsg)
-	}
+	switch itemID {
 
-	if uint32(sliceLen) == HeaderSizeUint && 3 == 0 {
-		return &AnyBalances{inner: slice}, nil
-	}
-
-	if uint32(sliceLen) < HeaderSizeUint*2 {
-		errMsg := strings.Join([]string{"TotalSizeNotMatch", "AnyBalances", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	offsetFirst := unpackNumber(slice[HeaderSizeUint:])
-	if uint32(offsetFirst)%HeaderSizeUint != 0 || uint32(offsetFirst) < HeaderSizeUint*2 {
-		errMsg := strings.Join([]string{"OffsetsNotMatch", "AnyBalances", strconv.Itoa(int(offsetFirst % 4)), "!= 0", strconv.Itoa(int(offsetFirst)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	if sliceLen < int(offsetFirst) {
-		errMsg := strings.Join([]string{"HeaderIsBroken", "AnyBalances", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(offsetFirst))}, " ")
-		return nil, errors.New(errMsg)
-	}
-
-	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
-	if fieldCount < 3 {
-		return nil, errors.New("FieldCountNotMatch")
-	} else if !compatible && fieldCount > 3 {
-		return nil, errors.New("FieldCountNotMatch")
-	}
-
-	offsets := make([]uint32, fieldCount)
-
-	for i := 0; i < int(fieldCount); i++ {
-		offsets[i] = uint32(unpackNumber(slice[HeaderSizeUint:][int(HeaderSizeUint)*i:]))
-	}
-	offsets = append(offsets, uint32(totalSize))
-
-	for i := 0; i < len(offsets); i++ {
-		if i&1 != 0 && offsets[i-1] > offsets[i] {
-			return nil, errors.New("OffsetsNotMatch")
+	case 0:
+		_, err := CKByteDistributionFromSlice(innerSlice, compatible)
+		if err != nil {
+			return nil, err
 		}
+
+	case 1:
+		_, err := SUDTBalancesFromSlice(innerSlice, compatible)
+		if err != nil {
+			return nil, err
+		}
+
+	case 2:
+		_, err := ETHBalancesFromSlice(innerSlice, compatible)
+		if err != nil {
+			return nil, err
+		}
+
+	default:
+		return nil, errors.New("UnknownItem, AnyBalances")
 	}
-
-	var err error
-
-	_, err = CKByteDistributionFromSlice(slice[offsets[0]:offsets[1]], compatible)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = SUDTBalancesFromSlice(slice[offsets[1]:offsets[2]], compatible)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = ETHBalancesFromSlice(slice[offsets[2]:offsets[3]], compatible)
-	if err != nil {
-		return nil, err
-	}
-
 	return &AnyBalances{inner: slice}, nil
 }
 
-func (s *AnyBalances) TotalSize() uint {
-	return uint(unpackNumber(s.inner))
+func (s *AnyBalances) ItemID() Number {
+	return unpackNumber(s.inner)
 }
-func (s *AnyBalances) FieldCount() uint {
-	var number uint = 0
-	if uint32(s.TotalSize()) == HeaderSizeUint {
-		return number
-	}
-	number = uint(unpackNumber(s.inner[HeaderSizeUint:]))/4 - 1
-	return number
-}
-func (s *AnyBalances) Len() uint {
-	return s.FieldCount()
-}
-func (s *AnyBalances) IsEmpty() bool {
-	return s.Len() == 0
-}
-func (s *AnyBalances) CountExtraFields() uint {
-	return s.FieldCount() - 3
-}
-
-func (s *AnyBalances) HasExtraFields() bool {
-	return 3 != s.FieldCount()
-}
-
-func (s *AnyBalances) Ckb() *CKByteDistribution {
-	start := unpackNumber(s.inner[4:])
-	end := unpackNumber(s.inner[8:])
-	return CKByteDistributionFromSliceUnchecked(s.inner[start:end])
-}
-
-func (s *AnyBalances) Sudt() *SUDTBalances {
-	start := unpackNumber(s.inner[8:])
-	end := unpackNumber(s.inner[12:])
-	return SUDTBalancesFromSliceUnchecked(s.inner[start:end])
-}
-
-func (s *AnyBalances) Eth() *ETHBalances {
-	var ret *ETHBalances
-	start := unpackNumber(s.inner[12:])
-	if s.HasExtraFields() {
-		end := unpackNumber(s.inner[16:])
-		ret = ETHBalancesFromSliceUnchecked(s.inner[start:end])
-	} else {
-		ret = ETHBalancesFromSliceUnchecked(s.inner[start:])
-	}
-	return ret
-}
-
 func (s *AnyBalances) AsBuilder() AnyBalancesBuilder {
-	ret := NewAnyBalancesBuilder().Ckb(*s.Ckb()).Sudt(*s.Sudt()).Eth(*s.Eth())
-	return *ret
+	return *NewAnyBalancesBuilder().Set(*s.ToUnion())
 }
 
 type AllocationBuilder struct {
