@@ -3353,6 +3353,76 @@ func (s *App) AsBuilder() AppBuilder {
 	return *ret
 }
 
+type CoordinatorBuilder struct {
+	isNone bool
+	inner  SEC1EncodedPubKey
+}
+
+func NewCoordinatorBuilder() *CoordinatorBuilder {
+	return &CoordinatorBuilder{isNone: true, inner: SEC1EncodedPubKeyDefault()}
+}
+func (s *CoordinatorBuilder) Set(v SEC1EncodedPubKey) *CoordinatorBuilder {
+	s.isNone = false
+	s.inner = v
+	return s
+}
+func (s *CoordinatorBuilder) Build() Coordinator {
+	var ret Coordinator
+	if s.isNone {
+		ret = Coordinator{inner: []byte{}}
+	} else {
+		ret = Coordinator{inner: s.inner.AsSlice()}
+	}
+	return ret
+}
+
+type Coordinator struct {
+	inner []byte
+}
+
+func CoordinatorFromSliceUnchecked(slice []byte) *Coordinator {
+	return &Coordinator{inner: slice}
+}
+func (s *Coordinator) AsSlice() []byte {
+	return s.inner
+}
+
+func CoordinatorDefault() Coordinator {
+	return *CoordinatorFromSliceUnchecked([]byte{})
+}
+
+func CoordinatorFromSlice(slice []byte, compatible bool) (*Coordinator, error) {
+	if len(slice) == 0 {
+		return &Coordinator{inner: slice}, nil
+	}
+
+	_, err := SEC1EncodedPubKeyFromSlice(slice, compatible)
+	if err != nil {
+		return nil, err
+	}
+	return &Coordinator{inner: slice}, nil
+}
+
+func (s *Coordinator) IntoSEC1EncodedPubKey() (*SEC1EncodedPubKey, error) {
+	if s.IsNone() {
+		return nil, errors.New("No data")
+	}
+	return SEC1EncodedPubKeyFromSliceUnchecked(s.AsSlice()), nil
+}
+func (s *Coordinator) IsSome() bool {
+	return len(s.inner) != 0
+}
+func (s *Coordinator) IsNone() bool {
+	return len(s.inner) == 0
+}
+func (s *Coordinator) AsBuilder() CoordinatorBuilder {
+	var ret = NewCoordinatorBuilder()
+	if s.IsSome() {
+		ret.Set(*SEC1EncodedPubKeyFromSliceUnchecked(s.AsSlice()))
+	}
+	return *ret
+}
+
 type ParticipantBuilder struct {
 	payment_script_hash  Byte32
 	payment_min_capacity Uint64
@@ -3569,13 +3639,14 @@ type ChannelParametersBuilder struct {
 	app                App
 	is_ledger_channel  Bool
 	is_virtual_channel Bool
+	coordinator        Coordinator
 }
 
 func (s *ChannelParametersBuilder) Build() ChannelParameters {
 	b := new(bytes.Buffer)
 
-	totalSize := HeaderSizeUint * (7 + 1)
-	offsets := make([]uint32, 0, 7)
+	totalSize := HeaderSizeUint * (8 + 1)
+	offsets := make([]uint32, 0, 8)
 
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.party_a.AsSlice()))
@@ -3591,6 +3662,8 @@ func (s *ChannelParametersBuilder) Build() ChannelParameters {
 	totalSize += uint32(len(s.is_ledger_channel.AsSlice()))
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.is_virtual_channel.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.coordinator.AsSlice()))
 
 	b.Write(packNumber(Number(totalSize)))
 
@@ -3605,6 +3678,7 @@ func (s *ChannelParametersBuilder) Build() ChannelParameters {
 	b.Write(s.app.AsSlice())
 	b.Write(s.is_ledger_channel.AsSlice())
 	b.Write(s.is_virtual_channel.AsSlice())
+	b.Write(s.coordinator.AsSlice())
 	return ChannelParameters{inner: b.Bytes()}
 }
 
@@ -3643,8 +3717,13 @@ func (s *ChannelParametersBuilder) IsVirtualChannel(v Bool) *ChannelParametersBu
 	return s
 }
 
+func (s *ChannelParametersBuilder) Coordinator(v Coordinator) *ChannelParametersBuilder {
+	s.coordinator = v
+	return s
+}
+
 func NewChannelParametersBuilder() *ChannelParametersBuilder {
-	return &ChannelParametersBuilder{party_a: ParticipantDefault(), party_b: ParticipantDefault(), nonce: Byte32Default(), challenge_duration: Uint64Default(), app: AppDefault(), is_ledger_channel: BoolDefault(), is_virtual_channel: BoolDefault()}
+	return &ChannelParametersBuilder{party_a: ParticipantDefault(), party_b: ParticipantDefault(), nonce: Byte32Default(), challenge_duration: Uint64Default(), app: AppDefault(), is_ledger_channel: BoolDefault(), is_virtual_channel: BoolDefault(), coordinator: CoordinatorDefault()}
 }
 
 type ChannelParameters struct {
@@ -3659,7 +3738,7 @@ func (s *ChannelParameters) AsSlice() []byte {
 }
 
 func ChannelParametersDefault() ChannelParameters {
-	return *ChannelParametersFromSliceUnchecked([]byte{76, 1, 0, 0, 32, 0, 0, 0, 157, 0, 0, 0, 26, 1, 0, 0, 58, 1, 0, 0, 66, 1, 0, 0, 66, 1, 0, 0, 71, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *ChannelParametersFromSliceUnchecked([]byte{80, 1, 0, 0, 36, 0, 0, 0, 161, 0, 0, 0, 30, 1, 0, 0, 62, 1, 0, 0, 70, 1, 0, 0, 70, 1, 0, 0, 75, 1, 0, 0, 80, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func ChannelParametersFromSlice(slice []byte, compatible bool) (*ChannelParameters, error) {
@@ -3692,9 +3771,9 @@ func ChannelParametersFromSlice(slice []byte, compatible bool) (*ChannelParamete
 	}
 
 	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
-	if fieldCount < 7 {
+	if fieldCount < 8 {
 		return nil, errors.New("FieldCountNotMatch")
-	} else if !compatible && fieldCount > 7 {
+	} else if !compatible && fieldCount > 8 {
 		return nil, errors.New("FieldCountNotMatch")
 	}
 
@@ -3748,6 +3827,11 @@ func ChannelParametersFromSlice(slice []byte, compatible bool) (*ChannelParamete
 		return nil, err
 	}
 
+	_, err = CoordinatorFromSlice(slice[offsets[7]:offsets[8]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ChannelParameters{inner: slice}, nil
 }
 
@@ -3769,11 +3853,11 @@ func (s *ChannelParameters) IsEmpty() bool {
 	return s.Len() == 0
 }
 func (s *ChannelParameters) CountExtraFields() uint {
-	return s.FieldCount() - 7
+	return s.FieldCount() - 8
 }
 
 func (s *ChannelParameters) HasExtraFields() bool {
-	return 7 != s.FieldCount()
+	return 8 != s.FieldCount()
 }
 
 func (s *ChannelParameters) PartyA() *Participant {
@@ -3813,19 +3897,25 @@ func (s *ChannelParameters) IsLedgerChannel() *Bool {
 }
 
 func (s *ChannelParameters) IsVirtualChannel() *Bool {
-	var ret *Bool
 	start := unpackNumber(s.inner[28:])
+	end := unpackNumber(s.inner[32:])
+	return BoolFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *ChannelParameters) Coordinator() *Coordinator {
+	var ret *Coordinator
+	start := unpackNumber(s.inner[32:])
 	if s.HasExtraFields() {
-		end := unpackNumber(s.inner[32:])
-		ret = BoolFromSliceUnchecked(s.inner[start:end])
+		end := unpackNumber(s.inner[36:])
+		ret = CoordinatorFromSliceUnchecked(s.inner[start:end])
 	} else {
-		ret = BoolFromSliceUnchecked(s.inner[start:])
+		ret = CoordinatorFromSliceUnchecked(s.inner[start:])
 	}
 	return ret
 }
 
 func (s *ChannelParameters) AsBuilder() ChannelParametersBuilder {
-	ret := NewChannelParametersBuilder().PartyA(*s.PartyA()).PartyB(*s.PartyB()).Nonce(*s.Nonce()).ChallengeDuration(*s.ChallengeDuration()).App(*s.App()).IsLedgerChannel(*s.IsLedgerChannel()).IsVirtualChannel(*s.IsVirtualChannel())
+	ret := NewChannelParametersBuilder().PartyA(*s.PartyA()).PartyB(*s.PartyB()).Nonce(*s.Nonce()).ChallengeDuration(*s.ChallengeDuration()).App(*s.App()).IsLedgerChannel(*s.IsLedgerChannel()).IsVirtualChannel(*s.IsVirtualChannel()).Coordinator(*s.Coordinator())
 	return *ret
 }
 
@@ -3927,7 +4017,7 @@ func (s *ChannelConstants) AsSlice() []byte {
 }
 
 func ChannelConstantsDefault() ChannelConstants {
-	return *ChannelConstantsFromSliceUnchecked([]byte{218, 1, 0, 0, 32, 0, 0, 0, 108, 1, 0, 0, 140, 1, 0, 0, 141, 1, 0, 0, 149, 1, 0, 0, 181, 1, 0, 0, 182, 1, 0, 0, 76, 1, 0, 0, 32, 0, 0, 0, 157, 0, 0, 0, 26, 1, 0, 0, 58, 1, 0, 0, 66, 1, 0, 0, 66, 1, 0, 0, 71, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *ChannelConstantsFromSliceUnchecked([]byte{222, 1, 0, 0, 32, 0, 0, 0, 112, 1, 0, 0, 144, 1, 0, 0, 145, 1, 0, 0, 153, 1, 0, 0, 185, 1, 0, 0, 186, 1, 0, 0, 80, 1, 0, 0, 36, 0, 0, 0, 161, 0, 0, 0, 30, 1, 0, 0, 62, 1, 0, 0, 70, 1, 0, 0, 70, 1, 0, 0, 75, 1, 0, 0, 80, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func ChannelConstantsFromSlice(slice []byte, compatible bool) (*ChannelConstants, error) {
@@ -4159,7 +4249,7 @@ func (s *VCChannelConstants) AsSlice() []byte {
 }
 
 func VCChannelConstantsDefault() VCChannelConstants {
-	return *VCChannelConstantsFromSliceUnchecked([]byte{125, 1, 0, 0, 16, 0, 0, 0, 92, 1, 0, 0, 124, 1, 0, 0, 76, 1, 0, 0, 32, 0, 0, 0, 157, 0, 0, 0, 26, 1, 0, 0, 58, 1, 0, 0, 66, 1, 0, 0, 66, 1, 0, 0, 71, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *VCChannelConstantsFromSliceUnchecked([]byte{129, 1, 0, 0, 16, 0, 0, 0, 96, 1, 0, 0, 128, 1, 0, 0, 80, 1, 0, 0, 36, 0, 0, 0, 161, 0, 0, 0, 30, 1, 0, 0, 62, 1, 0, 0, 70, 1, 0, 0, 70, 1, 0, 0, 75, 1, 0, 0, 80, 1, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func VCChannelConstantsFromSlice(slice []byte, compatible bool) (*VCChannelConstants, error) {
@@ -4961,6 +5051,214 @@ func (s *Close) AsBuilder() CloseBuilder {
 	return *ret
 }
 
+type CoordinateBuilder struct {
+	state     ChannelState
+	sig_a     Bytes
+	sig_b     Bytes
+	coord_sig Bytes
+}
+
+func (s *CoordinateBuilder) Build() Coordinate {
+	b := new(bytes.Buffer)
+
+	totalSize := HeaderSizeUint * (4 + 1)
+	offsets := make([]uint32, 0, 4)
+
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.state.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.sig_a.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.sig_b.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.coord_sig.AsSlice()))
+
+	b.Write(packNumber(Number(totalSize)))
+
+	for i := 0; i < len(offsets); i++ {
+		b.Write(packNumber(Number(offsets[i])))
+	}
+
+	b.Write(s.state.AsSlice())
+	b.Write(s.sig_a.AsSlice())
+	b.Write(s.sig_b.AsSlice())
+	b.Write(s.coord_sig.AsSlice())
+	return Coordinate{inner: b.Bytes()}
+}
+
+func (s *CoordinateBuilder) State(v ChannelState) *CoordinateBuilder {
+	s.state = v
+	return s
+}
+
+func (s *CoordinateBuilder) SigA(v Bytes) *CoordinateBuilder {
+	s.sig_a = v
+	return s
+}
+
+func (s *CoordinateBuilder) SigB(v Bytes) *CoordinateBuilder {
+	s.sig_b = v
+	return s
+}
+
+func (s *CoordinateBuilder) CoordSig(v Bytes) *CoordinateBuilder {
+	s.coord_sig = v
+	return s
+}
+
+func NewCoordinateBuilder() *CoordinateBuilder {
+	return &CoordinateBuilder{state: ChannelStateDefault(), sig_a: BytesDefault(), sig_b: BytesDefault(), coord_sig: BytesDefault()}
+}
+
+type Coordinate struct {
+	inner []byte
+}
+
+func CoordinateFromSliceUnchecked(slice []byte) *Coordinate {
+	return &Coordinate{inner: slice}
+}
+func (s *Coordinate) AsSlice() []byte {
+	return s.inner
+}
+
+func CoordinateDefault() Coordinate {
+	return *CoordinateFromSliceUnchecked([]byte{117, 0, 0, 0, 20, 0, 0, 0, 105, 0, 0, 0, 109, 0, 0, 0, 113, 0, 0, 0, 85, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+}
+
+func CoordinateFromSlice(slice []byte, compatible bool) (*Coordinate, error) {
+	sliceLen := len(slice)
+	if uint32(sliceLen) < HeaderSizeUint {
+		errMsg := strings.Join([]string{"HeaderIsBroken", "Coordinate", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint))}, " ")
+		return nil, errors.New(errMsg)
+	}
+
+	totalSize := unpackNumber(slice)
+	if Number(sliceLen) != totalSize {
+		errMsg := strings.Join([]string{"TotalSizeNotMatch", "Coordinate", strconv.Itoa(int(sliceLen)), "!=", strconv.Itoa(int(totalSize))}, " ")
+		return nil, errors.New(errMsg)
+	}
+
+	if uint32(sliceLen) < HeaderSizeUint*2 {
+		errMsg := strings.Join([]string{"TotalSizeNotMatch", "Coordinate", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
+		return nil, errors.New(errMsg)
+	}
+
+	offsetFirst := unpackNumber(slice[HeaderSizeUint:])
+	if uint32(offsetFirst)%HeaderSizeUint != 0 || uint32(offsetFirst) < HeaderSizeUint*2 {
+		errMsg := strings.Join([]string{"OffsetsNotMatch", "Coordinate", strconv.Itoa(int(offsetFirst % 4)), "!= 0", strconv.Itoa(int(offsetFirst)), "<", strconv.Itoa(int(HeaderSizeUint * 2))}, " ")
+		return nil, errors.New(errMsg)
+	}
+
+	if sliceLen < int(offsetFirst) {
+		errMsg := strings.Join([]string{"HeaderIsBroken", "Coordinate", strconv.Itoa(int(sliceLen)), "<", strconv.Itoa(int(offsetFirst))}, " ")
+		return nil, errors.New(errMsg)
+	}
+
+	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
+	if fieldCount < 4 {
+		return nil, errors.New("FieldCountNotMatch")
+	} else if !compatible && fieldCount > 4 {
+		return nil, errors.New("FieldCountNotMatch")
+	}
+
+	offsets := make([]uint32, fieldCount)
+
+	for i := 0; i < int(fieldCount); i++ {
+		offsets[i] = uint32(unpackNumber(slice[HeaderSizeUint:][int(HeaderSizeUint)*i:]))
+	}
+	offsets = append(offsets, uint32(totalSize))
+
+	for i := 0; i < len(offsets); i++ {
+		if i&1 != 0 && offsets[i-1] > offsets[i] {
+			return nil, errors.New("OffsetsNotMatch")
+		}
+	}
+
+	var err error
+
+	_, err = ChannelStateFromSlice(slice[offsets[0]:offsets[1]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = BytesFromSlice(slice[offsets[1]:offsets[2]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = BytesFromSlice(slice[offsets[2]:offsets[3]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = BytesFromSlice(slice[offsets[3]:offsets[4]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Coordinate{inner: slice}, nil
+}
+
+func (s *Coordinate) TotalSize() uint {
+	return uint(unpackNumber(s.inner))
+}
+func (s *Coordinate) FieldCount() uint {
+	var number uint = 0
+	if uint32(s.TotalSize()) == HeaderSizeUint {
+		return number
+	}
+	number = uint(unpackNumber(s.inner[HeaderSizeUint:]))/4 - 1
+	return number
+}
+func (s *Coordinate) Len() uint {
+	return s.FieldCount()
+}
+func (s *Coordinate) IsEmpty() bool {
+	return s.Len() == 0
+}
+func (s *Coordinate) CountExtraFields() uint {
+	return s.FieldCount() - 4
+}
+
+func (s *Coordinate) HasExtraFields() bool {
+	return 4 != s.FieldCount()
+}
+
+func (s *Coordinate) State() *ChannelState {
+	start := unpackNumber(s.inner[4:])
+	end := unpackNumber(s.inner[8:])
+	return ChannelStateFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *Coordinate) SigA() *Bytes {
+	start := unpackNumber(s.inner[8:])
+	end := unpackNumber(s.inner[12:])
+	return BytesFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *Coordinate) SigB() *Bytes {
+	start := unpackNumber(s.inner[12:])
+	end := unpackNumber(s.inner[16:])
+	return BytesFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *Coordinate) CoordSig() *Bytes {
+	var ret *Bytes
+	start := unpackNumber(s.inner[16:])
+	if s.HasExtraFields() {
+		end := unpackNumber(s.inner[20:])
+		ret = BytesFromSliceUnchecked(s.inner[start:end])
+	} else {
+		ret = BytesFromSliceUnchecked(s.inner[start:])
+	}
+	return ret
+}
+
+func (s *Coordinate) AsBuilder() CoordinateBuilder {
+	ret := NewCoordinateBuilder().State(*s.State()).SigA(*s.SigA()).SigB(*s.SigB()).CoordSig(*s.CoordSig())
+	return *ret
+}
+
 type ForceCloseBuilder struct {
 	inner [1]Byte
 }
@@ -5158,6 +5456,20 @@ func (s *ChannelWitnessUnion) IntoForceClose() *ForceClose {
 	}
 }
 
+func ChannelWitnessUnionFromCoordinate(v Coordinate) ChannelWitnessUnion {
+	return ChannelWitnessUnion{itemID: 6, inner: v.AsSlice()}
+}
+
+func (s *ChannelWitnessUnion) IntoCoordinate() *Coordinate {
+	switch s.ItemID() {
+	case 6:
+		return CoordinateFromSliceUnchecked(s.AsSlice())
+	default:
+		errMsg := strings.Join([]string{"invalid item_id: expect 6, found", strconv.Itoa(int(s.ItemID()))}, " ")
+		panic(errMsg)
+	}
+}
+
 func (s *ChannelWitnessUnion) ItemName() string {
 	switch s.itemID {
 
@@ -5178,6 +5490,9 @@ func (s *ChannelWitnessUnion) ItemName() string {
 
 	case 5:
 		return "ForceClose"
+
+	case 6:
+		return "Coordinate"
 
 	default:
 		panic("invalid data: ChannelWitnessUnion")
@@ -5204,6 +5519,9 @@ func (s *ChannelWitness) ToUnion() *ChannelWitnessUnion {
 
 	case 5:
 		return &ChannelWitnessUnion{itemID: 5, inner: s.inner[HeaderSizeUint:]}
+
+	case 6:
+		return &ChannelWitnessUnion{itemID: 6, inner: s.inner[HeaderSizeUint:]}
 
 	default:
 		panic("invalid data: ChannelWitness")
@@ -5253,6 +5571,12 @@ func ChannelWitnessFromSlice(slice []byte, compatible bool) (*ChannelWitness, er
 
 	case 5:
 		_, err := ForceCloseFromSlice(innerSlice, compatible)
+		if err != nil {
+			return nil, err
+		}
+
+	case 6:
+		_, err := CoordinateFromSlice(innerSlice, compatible)
 		if err != nil {
 			return nil, err
 		}
@@ -5484,13 +5808,14 @@ type ChannelStatusBuilder struct {
 	disputed    Bool
 	vc_disputed Bool
 	vcts_hash   Byte32
+	coordinated Bool
 }
 
 func (s *ChannelStatusBuilder) Build() ChannelStatus {
 	b := new(bytes.Buffer)
 
-	totalSize := HeaderSizeUint * (5 + 1)
-	offsets := make([]uint32, 0, 5)
+	totalSize := HeaderSizeUint * (6 + 1)
+	offsets := make([]uint32, 0, 6)
 
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.state.AsSlice()))
@@ -5502,6 +5827,8 @@ func (s *ChannelStatusBuilder) Build() ChannelStatus {
 	totalSize += uint32(len(s.vc_disputed.AsSlice()))
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.vcts_hash.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.coordinated.AsSlice()))
 
 	b.Write(packNumber(Number(totalSize)))
 
@@ -5514,6 +5841,7 @@ func (s *ChannelStatusBuilder) Build() ChannelStatus {
 	b.Write(s.disputed.AsSlice())
 	b.Write(s.vc_disputed.AsSlice())
 	b.Write(s.vcts_hash.AsSlice())
+	b.Write(s.coordinated.AsSlice())
 	return ChannelStatus{inner: b.Bytes()}
 }
 
@@ -5542,8 +5870,13 @@ func (s *ChannelStatusBuilder) VctsHash(v Byte32) *ChannelStatusBuilder {
 	return s
 }
 
+func (s *ChannelStatusBuilder) Coordinated(v Bool) *ChannelStatusBuilder {
+	s.coordinated = v
+	return s
+}
+
 func NewChannelStatusBuilder() *ChannelStatusBuilder {
-	return &ChannelStatusBuilder{state: ChannelStateDefault(), funded: BoolDefault(), disputed: BoolDefault(), vc_disputed: BoolDefault(), vcts_hash: Byte32Default()}
+	return &ChannelStatusBuilder{state: ChannelStateDefault(), funded: BoolDefault(), disputed: BoolDefault(), vc_disputed: BoolDefault(), vcts_hash: Byte32Default(), coordinated: BoolDefault()}
 }
 
 type ChannelStatus struct {
@@ -5558,7 +5891,7 @@ func (s *ChannelStatus) AsSlice() []byte {
 }
 
 func ChannelStatusDefault() ChannelStatus {
-	return *ChannelStatusFromSliceUnchecked([]byte{156, 0, 0, 0, 24, 0, 0, 0, 109, 0, 0, 0, 114, 0, 0, 0, 119, 0, 0, 0, 124, 0, 0, 0, 85, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *ChannelStatusFromSliceUnchecked([]byte{165, 0, 0, 0, 28, 0, 0, 0, 113, 0, 0, 0, 118, 0, 0, 0, 123, 0, 0, 0, 128, 0, 0, 0, 160, 0, 0, 0, 85, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func ChannelStatusFromSlice(slice []byte, compatible bool) (*ChannelStatus, error) {
@@ -5591,9 +5924,9 @@ func ChannelStatusFromSlice(slice []byte, compatible bool) (*ChannelStatus, erro
 	}
 
 	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
-	if fieldCount < 5 {
+	if fieldCount < 6 {
 		return nil, errors.New("FieldCountNotMatch")
-	} else if !compatible && fieldCount > 5 {
+	} else if !compatible && fieldCount > 6 {
 		return nil, errors.New("FieldCountNotMatch")
 	}
 
@@ -5637,6 +5970,11 @@ func ChannelStatusFromSlice(slice []byte, compatible bool) (*ChannelStatus, erro
 		return nil, err
 	}
 
+	_, err = BoolFromSlice(slice[offsets[5]:offsets[6]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ChannelStatus{inner: slice}, nil
 }
 
@@ -5658,11 +5996,11 @@ func (s *ChannelStatus) IsEmpty() bool {
 	return s.Len() == 0
 }
 func (s *ChannelStatus) CountExtraFields() uint {
-	return s.FieldCount() - 5
+	return s.FieldCount() - 6
 }
 
 func (s *ChannelStatus) HasExtraFields() bool {
-	return 5 != s.FieldCount()
+	return 6 != s.FieldCount()
 }
 
 func (s *ChannelStatus) State() *ChannelState {
@@ -5690,19 +6028,25 @@ func (s *ChannelStatus) VcDisputed() *Bool {
 }
 
 func (s *ChannelStatus) VctsHash() *Byte32 {
-	var ret *Byte32
 	start := unpackNumber(s.inner[20:])
+	end := unpackNumber(s.inner[24:])
+	return Byte32FromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *ChannelStatus) Coordinated() *Bool {
+	var ret *Bool
+	start := unpackNumber(s.inner[24:])
 	if s.HasExtraFields() {
-		end := unpackNumber(s.inner[24:])
-		ret = Byte32FromSliceUnchecked(s.inner[start:end])
+		end := unpackNumber(s.inner[28:])
+		ret = BoolFromSliceUnchecked(s.inner[start:end])
 	} else {
-		ret = Byte32FromSliceUnchecked(s.inner[start:])
+		ret = BoolFromSliceUnchecked(s.inner[start:])
 	}
 	return ret
 }
 
 func (s *ChannelStatus) AsBuilder() ChannelStatusBuilder {
-	ret := NewChannelStatusBuilder().State(*s.State()).Funded(*s.Funded()).Disputed(*s.Disputed()).VcDisputed(*s.VcDisputed()).VctsHash(*s.VctsHash())
+	ret := NewChannelStatusBuilder().State(*s.State()).Funded(*s.Funded()).Disputed(*s.Disputed()).VcDisputed(*s.VcDisputed()).VctsHash(*s.VctsHash()).Coordinated(*s.Coordinated())
 	return *ret
 }
 
@@ -6122,13 +6466,14 @@ type VirtualChannelStatusBuilder struct {
 	parents           ParentsVec
 	first_force_close Bool
 	owner             Participant
+	coordinated       Bool
 }
 
 func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
 	b := new(bytes.Buffer)
 
-	totalSize := HeaderSizeUint * (4 + 1)
-	offsets := make([]uint32, 0, 4)
+	totalSize := HeaderSizeUint * (5 + 1)
+	offsets := make([]uint32, 0, 5)
 
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.vcstate.AsSlice()))
@@ -6138,6 +6483,8 @@ func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
 	totalSize += uint32(len(s.first_force_close.AsSlice()))
 	offsets = append(offsets, totalSize)
 	totalSize += uint32(len(s.owner.AsSlice()))
+	offsets = append(offsets, totalSize)
+	totalSize += uint32(len(s.coordinated.AsSlice()))
 
 	b.Write(packNumber(Number(totalSize)))
 
@@ -6149,6 +6496,7 @@ func (s *VirtualChannelStatusBuilder) Build() VirtualChannelStatus {
 	b.Write(s.parents.AsSlice())
 	b.Write(s.first_force_close.AsSlice())
 	b.Write(s.owner.AsSlice())
+	b.Write(s.coordinated.AsSlice())
 	return VirtualChannelStatus{inner: b.Bytes()}
 }
 
@@ -6172,8 +6520,13 @@ func (s *VirtualChannelStatusBuilder) Owner(v Participant) *VirtualChannelStatus
 	return s
 }
 
+func (s *VirtualChannelStatusBuilder) Coordinated(v Bool) *VirtualChannelStatusBuilder {
+	s.coordinated = v
+	return s
+}
+
 func NewVirtualChannelStatusBuilder() *VirtualChannelStatusBuilder {
-	return &VirtualChannelStatusBuilder{vcstate: ChannelStateDefault(), parents: ParentsVecDefault(), first_force_close: BoolDefault(), owner: ParticipantDefault()}
+	return &VirtualChannelStatusBuilder{vcstate: ChannelStateDefault(), parents: ParentsVecDefault(), first_force_close: BoolDefault(), owner: ParticipantDefault(), coordinated: BoolDefault()}
 }
 
 type VirtualChannelStatus struct {
@@ -6188,7 +6541,7 @@ func (s *VirtualChannelStatus) AsSlice() []byte {
 }
 
 func VirtualChannelStatusDefault() VirtualChannelStatus {
-	return *VirtualChannelStatusFromSliceUnchecked([]byte{239, 0, 0, 0, 20, 0, 0, 0, 105, 0, 0, 0, 109, 0, 0, 0, 114, 0, 0, 0, 85, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	return *VirtualChannelStatusFromSliceUnchecked([]byte{248, 0, 0, 0, 24, 0, 0, 0, 109, 0, 0, 0, 113, 0, 0, 0, 118, 0, 0, 0, 243, 0, 0, 0, 85, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 12, 0, 0, 0, 16, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 125, 0, 0, 0, 20, 0, 0, 0, 52, 0, 0, 0, 60, 0, 0, 0, 92, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 }
 
 func VirtualChannelStatusFromSlice(slice []byte, compatible bool) (*VirtualChannelStatus, error) {
@@ -6221,9 +6574,9 @@ func VirtualChannelStatusFromSlice(slice []byte, compatible bool) (*VirtualChann
 	}
 
 	fieldCount := uint32(offsetFirst)/HeaderSizeUint - 1
-	if fieldCount < 4 {
+	if fieldCount < 5 {
 		return nil, errors.New("FieldCountNotMatch")
-	} else if !compatible && fieldCount > 4 {
+	} else if !compatible && fieldCount > 5 {
 		return nil, errors.New("FieldCountNotMatch")
 	}
 
@@ -6262,6 +6615,11 @@ func VirtualChannelStatusFromSlice(slice []byte, compatible bool) (*VirtualChann
 		return nil, err
 	}
 
+	_, err = BoolFromSlice(slice[offsets[4]:offsets[5]], compatible)
+	if err != nil {
+		return nil, err
+	}
+
 	return &VirtualChannelStatus{inner: slice}, nil
 }
 
@@ -6283,11 +6641,11 @@ func (s *VirtualChannelStatus) IsEmpty() bool {
 	return s.Len() == 0
 }
 func (s *VirtualChannelStatus) CountExtraFields() uint {
-	return s.FieldCount() - 4
+	return s.FieldCount() - 5
 }
 
 func (s *VirtualChannelStatus) HasExtraFields() bool {
-	return 4 != s.FieldCount()
+	return 5 != s.FieldCount()
 }
 
 func (s *VirtualChannelStatus) Vcstate() *ChannelState {
@@ -6309,18 +6667,24 @@ func (s *VirtualChannelStatus) FirstForceClose() *Bool {
 }
 
 func (s *VirtualChannelStatus) Owner() *Participant {
-	var ret *Participant
 	start := unpackNumber(s.inner[16:])
+	end := unpackNumber(s.inner[20:])
+	return ParticipantFromSliceUnchecked(s.inner[start:end])
+}
+
+func (s *VirtualChannelStatus) Coordinated() *Bool {
+	var ret *Bool
+	start := unpackNumber(s.inner[20:])
 	if s.HasExtraFields() {
-		end := unpackNumber(s.inner[20:])
-		ret = ParticipantFromSliceUnchecked(s.inner[start:end])
+		end := unpackNumber(s.inner[24:])
+		ret = BoolFromSliceUnchecked(s.inner[start:end])
 	} else {
-		ret = ParticipantFromSliceUnchecked(s.inner[start:])
+		ret = BoolFromSliceUnchecked(s.inner[start:])
 	}
 	return ret
 }
 
 func (s *VirtualChannelStatus) AsBuilder() VirtualChannelStatusBuilder {
-	ret := NewVirtualChannelStatusBuilder().Vcstate(*s.Vcstate()).Parents(*s.Parents()).FirstForceClose(*s.FirstForceClose()).Owner(*s.Owner())
+	ret := NewVirtualChannelStatusBuilder().Vcstate(*s.Vcstate()).Parents(*s.Parents()).FirstForceClose(*s.FirstForceClose()).Owner(*s.Owner()).Coordinated(*s.Coordinated())
 	return *ret
 }
